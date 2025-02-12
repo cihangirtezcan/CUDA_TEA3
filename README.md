@@ -1,6 +1,6 @@
 # CUDA TEA3
 
-These CUDA Optimizations are used in the ToSC publication **GPU Assisted Brute Force Cryptanalysis of GPRS, GSM, RFID, and TETRA - Brute Force Cryptanalysis of KASUMI, SPECK, and TEA3**.
+These CUDA Optimizations are used in the ToSC publication **GPU Assisted Brute Force Cryptanalysis of GPRS, GSM, RFID, and TETRA - Brute Force Cryptanalysis of KASUMI, SPECK, and TEA3** by Cihangir Tezcan and Gregor Leander.
 
 It measures how many seconds it takes for your GPU to perform **2^{18 + n}** key trials where **n** is a user input. 
 
