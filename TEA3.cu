@@ -5,10 +5,9 @@
 #include <Windows.h>
 #include <inttypes.h>
 #include <string.h>
-#include "tea3.h"
 
 #define BLOCKS				1024
-#define THREADS				256  // Cannot be less than 256
+#define THREADS				256  // Cannot be less than 256 because at the beginning of each kernel the first 256 threads in a block copies 256 S-box values from global memory to the shared memory
 #define BLOCKSLOG				10
 #define THREADSLOG				8
 int choice = 0; int trials = 0;
@@ -320,6 +319,8 @@ __global__ void tea3_exhaustive_1conflict(uint32_t dwFrameNumbers, uint32_t dwNu
         if (flag == 1) { gpu_captured_key[0] = threadIndex; gpu_captured_key[1] = trial; }
     }
 }
+// tea3_exhaustive_bitsliced kernel keeps each bit of the state in a byte (8-bit) variable
+// These 8-bit variables keep 8 different states so one encryption performed by a thread actually means 8 encryptions in parallel
 __global__ void tea3_exhaustive_bitsliced(uint8_t *reg, uint32_t dwNumKsBytes, uint8_t* lpKsOut_d, uint8_t* gpu_abTea3Sbox_d, int trials, uint64_t* gpu_captured_key) {
     __shared__ uint8_t gpu_abTea3Sbox[256];
     __shared__ uint8_t lpKsOut[80];
@@ -749,6 +750,8 @@ __global__ void tea3_exhaustive_bitsliced_shared(uint8_t* reg, uint32_t dwNumKsB
 
     }
 }
+// tea3_exhaustive_bitsliced16 kernel keeps each bit of the state in a 16-bit variable
+// These 16-bit variables keep 16 different states so one encryption performed by a thread actually means 16 encryptions in parallel
 __global__ void tea3_exhaustive_bitsliced16(uint16_t* reg, uint32_t dwNumKsBytes, uint16_t* lpKsOut_d, uint8_t* gpu_abTea3Sbox_d, int trials, uint64_t* gpu_captured_key) {
     __shared__ uint8_t gpu_abTea3Sbox[256];
     __shared__ uint16_t lpKsOut[80];
@@ -904,6 +907,8 @@ __global__ void tea3_exhaustive_bitsliced16(uint16_t* reg, uint32_t dwNumKsBytes
         if (flag_overall == 1) { gpu_captured_key[0] = threadIndex; gpu_captured_key[1] = trial; }
     }
 }
+// tea3_exhaustive_bitsliced32 kernel keeps each bit of the state in a 32-bit variable
+// These 32-bit variables keep 32 different states so one encryption performed by a thread actually means 32 encryptions in parallel
 __global__ void tea3_exhaustive_bitsliced32(uint32_t* reg, uint32_t dwNumKsBytes, uint32_t* lpKsOut_d, uint8_t* gpu_abTea3Sbox_d, int trials, uint64_t* gpu_captured_key) {
     __shared__ uint8_t gpu_abTea3Sbox[256];
     __shared__ uint32_t lpKsOut[80];
@@ -926,15 +931,11 @@ __global__ void tea3_exhaustive_bitsliced32(uint32_t* reg, uint32_t dwNumKsBytes
         for (uint64_t i = 0; i < 32; i++) {
             key_right[i] = trial; // rightmost 16 bits
             key_left[i] = threadIndex ^ (i << 36); // leftmost 64 bits
-//            key_left[i] = (threadIndex << (64 - BLOCKSLOG - THREADSLOG)) ^ (i << 36); // leftmost 64 bits
             flag[i] = 1;
         }
         int flag_overall = flag[0] | flag[1] | flag[2] | flag[3] | flag[4] | flag[5] | flag[6] | flag[7] | flag[8] | flag[9] | flag[10] | flag[11] | flag[12] | flag[13] | flag[14] | flag[15]
             | flag[16] | flag[17] | flag[18] | flag[19] | flag[20] | flag[21] | flag[22] | flag[23] | flag[24] | flag[25] | flag[26] | flag[27] | flag[28] | flag[29] | flag[30] | flag[31];
-//#pragma unroll
         for (int w = 0; (w < dwNumKsBytes) && flag_overall == 1; w++) {
- //           for (int w = 0; (w < dwNumKsBytes) ; w++) {
-//#pragma unroll
             for (int j = 0; j < dwNumSkipRounds; j++) {
                 // Step 1: Derive a non-linear feedback byte through sbox and feed back into key register
                 uint32_t bSboxOut[32] = { 0 };
@@ -944,8 +945,6 @@ __global__ void tea3_exhaustive_bitsliced32(uint32_t* reg, uint32_t dwNumKsBytes
                     key_left[i] = (key_left[i] << 8) ^ (key_right[i] >> 8);
                     key_right[i] = (key_right[i] << 8) ^ (bSboxOut[i] & 0xff);
                 }
-                //              if (threadIndex == 0) for (int i = 0; i < 16; i++) printf("%llx %x\n",key_left[i], key_right[i]); // keys are generated correctly 
-                //              if (threadIndex == 0) { printf("\n"); for (int i = 0; i < 64; i++) printf("%02x\n", reg[i]); printf("\n"); }
                 bDerivByte12[7] = r[50] & r[49] & r[42] ^ r[50] & r[49] ^ r[50] & r[42] & r[41] ^ r[50] & r[42] ^ r[50] & r[41] ^ r[49] & r[42] & r[41] ^ r[42] ^ r[41] ^ 0xffffffff;
                 bDerivByte12[6] = r[49] & r[48] & r[41] ^ r[49] & r[48] ^ r[49] & r[41] & r[40] ^ r[49] & r[40] ^ r[49] ^ r[48] & r[40] ^ r[48] ^ r[41] ^ 0xffffffff;
                 bDerivByte12[5] = r[55] & r[48] & r[47] ^ r[55] & r[48] & r[40] ^ r[55] & r[47] & r[40] ^ r[55] & r[47] ^ r[55] ^ r[48] & r[47] & r[40] ^ r[47];
@@ -973,10 +972,7 @@ __global__ void tea3_exhaustive_bitsliced32(uint32_t* reg, uint32_t dwNumKsBytes
                 bReordByte4[6] = r[24];
                 bReordByte4[7] = r[28];
 
-                //                              if (threadIndex == 0) { printf("\n"); for (int i = 0; i < 8; i++) printf("%x\n", bDerivByte12[i]); printf("\n");}
-                //              if (threadIndex == 0) { printf("\n"); for (int i = 0; i < 8; i++) printf("%x\n", bDerivByte56[i]); printf("\n"); }
-                //               if (threadIndex == 0) { printf("\n"); for (int i = 0; i < 8; i++) printf("%x\n", bReordByte4[i]); printf("\n"); }
-                                               // Transpose the S-box output
+                // Transpose the S-box output
                 int k;
                 unsigned m, t;
                 m = 0x0000FFFF;
@@ -991,7 +987,6 @@ __global__ void tea3_exhaustive_bitsliced32(uint32_t* reg, uint32_t dwNumKsBytes
                 }
 #pragma unroll
                 for (int i = 0; i < 8; i++) bNewByte[i] = r[i] ^ bReordByte4[i] ^ bDerivByte12[i] ^ bSboxOut[i + 24];
-
                 r[0] = r[8];
                 r[1] = r[9];
                 r[2] = r[10];
@@ -1073,6 +1068,11 @@ __global__ void tea3_exhaustive_bitsliced32(uint32_t* reg, uint32_t dwNumKsBytes
 }
 
 void user_input() {
+    // Default values of BLOCKS=1024, THREADS=256 mean that a kernel creates 2^18 threads.
+    // How many encryptions each thread is going to perform is determined by the user as a power of 2
+    // Thus, for a non-bitsliced implementation, a user input of 5 means 2^23 encryptions for a kernel
+    // For a bitsliced implementation where 32-bit values store 32 different states, 2^18 threads performe 2^23 encryptions
+    
     printf("(1) Exhaustive search on 80-bit keystream\n"
         "(2) Exhaustive key search on 80-bit keystream (0 shared memory bank conflicts)\n"
         "(3) Exhaustive key search on 80-bit keystream (some shared memory bank conflicts)\n"
@@ -1080,14 +1080,18 @@ void user_input() {
         "(5) Keystream generation of 80 bits (0 shared memory bank conflicts)\n"
         "(6) Keystream generation of 80 bits(some shared memory bank conflicts)\n"
         "...\n"
-        "(11) BITSLICED Exhaustive search on 80-bit keystream (8 times in parallel)\n"
-        "(12) BITSLICED Exhaustive search on 80-bit keystream (8 times in parallel) (0 bank conflicts)\n"
-        "(13) BITSLICED Exhaustive search on 80-bit keystream (16 times in parallel)\n"
-        "(14) BITSLICED Exhaustive search on 80-bit keystream (32 times in parallel)\n"
+        "(11) BITSLICED Exhaustive search on 80-bit keystream (Each thread performs 8 encrypitons in parallel)\n"
+        "(12) BITSLICED Exhaustive search on 80-bit keystream (Each thread performs 8 encrypitons in parallel) (0 bank conflicts)\n"
+        "(13) BITSLICED Exhaustive search on 80-bit keystream (Each thread performs 16 encrypitons in parallel)\n"
+        "(14) BITSLICED Exhaustive search on 80-bit keystream (Each thread performs 32 encrypitons in parallel)\n"
         "Choice: "
     );
     scanf_s("%d", &choice);
-    printf("Trials 2^18 + ");
+    if (choice == 11) printf("Trials 2^21 + ");
+    else if (choice == 12) printf("Trials 2^21 + ");
+    else if (choice == 13) printf("Trials 2^22 + ");
+    else if (choice == 14) printf("Trials 2^23 + ");
+    else printf("Trials 2^18 + ");
     scanf_s("%d", &trials);
     trials = 1 << trials;
 }
@@ -1099,11 +1103,9 @@ int main() {
     uint16_t *gpu_awTea3LutB;
     uint8_t *gpu_abTea3Sbox;
     uint8_t *gpu_lpKsOut;
-    uint64_t *gpu_captured_key; uint64_t captured_key[2] = { 0xffffffffffffffff, 0xffffffffffffffff };
-    
+    uint64_t *gpu_captured_key; uint64_t captured_key[2] = { 0xffffffffffffffff, 0xffffffffffffffff };    
     uint8_t bitsliced_keystream[80] = { 0 }; uint16_t bitsliced_keystream16[80] = { 0 }; uint32_t bitsliced_keystream32[80] = { 0 };
     uint8_t *bitsliced_keystream_d; uint16_t* bitsliced_keystream16_d; uint32_t* bitsliced_keystream32_d;
- //   uint8_t key[10] = { 0 };
     uint32_t dwNumKsBytes = 10;
     // Test vectors 1
  //   uint32_t dwFrameNumbers = 0;// 0xffffffff;
@@ -1111,10 +1113,7 @@ int main() {
     // Test vectors 2
     uint32_t dwFrameNumbers = 0x176C;
     uint8_t lpKsOut[10] = { 0x88, 0x40, 0x58, 0x9f, 0x88, 0x7b, 0x93, 0xa5, 0xac, 0x91 };
-
-//    tea3(dwFrameNumbers, key, dwNumKsBytes, lpKsOut);
     uint64_t qwIvReg = tea3_compute_iv(dwFrameNumbers);
- //   printf("IV: %llx\n", qwIvReg);
     uint8_t reg[64] = {0};    uint16_t reg16[64] = { 0 }; uint32_t reg32[64] = { 0 };
     uint8_t *reg_d; uint16_t* reg16_d; uint32_t* reg32_d;
     for (int i = 0; i < 64; i++)
@@ -1150,7 +1149,6 @@ int main() {
                 bitsliced_keystream32[t * 8 + i] = bitsliced_keystream32[t * 8 + i] << 1;
                 bitsliced_keystream32[t * 8 + i] ^= (lpKsOut[t] >> (7 - i)) & 0x1;
             }
- //   for (int i = 0; i < 80; i++) printf("%02x %04x\n", reg[i], reg16[i]);
     cudaMalloc((void**)&gpu_awTea3LutA, 8 * sizeof(uint16_t));
     cudaMalloc((void**)&gpu_awTea3LutB, 8 * sizeof(uint16_t));
     cudaMalloc((void**)&gpu_abTea3Sbox, 256 * sizeof(uint8_t));
@@ -1187,10 +1185,8 @@ int main() {
     else if (choice == 14) tea3_exhaustive_bitsliced32 << <BLOCKS, THREADS >> > (reg32_d, dwNumKsBytes, bitsliced_keystream32_d, gpu_abTea3Sbox, trials, gpu_captured_key); // Best
     cudaMemcpy(captured_key, gpu_captured_key, 2 * sizeof(uint64_t), cudaMemcpyDeviceToHost);
     cudaEventRecord(stopx);    cudaEventSynchronize(stopx);    cudaEventElapsedTime(&time, startx, stopx);
-     printf("Captured key: %llx %llx\n", captured_key[0], captured_key[1]);
-
+    printf("Captured key: %llx %llx\n", captured_key[0], captured_key[1]);
     printf("Elapsed time: %f\n", time);
-    printf("%s\n", cudaGetErrorString(cudaGetLastError()));
- 
+    printf("%s\n", cudaGetErrorString(cudaGetLastError())); 
     return 0;
 }
